@@ -1,0 +1,877 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>fami.ly Prototyp v1.14</title>
+    
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+    <style>
+        :root {
+            --surface: #ffffff;
+            --surface-glass: rgba(255, 255, 255, 0.92);
+            --text-main: #111827;
+            --text-sec: #6b7280;
+            --border: #f3f4f6;
+            --waymo-black: #111111;
+            --waymo-teal: #008a7a;
+            --error: #ef4444;
+            --radius-sheet: 32px;
+            --radius-input: 16px;
+            --radius-btn: 30px;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background-color: #1a1a1a; margin: 0; padding: 20px; display: flex; justify-content: center; align-items: center; min-height: 100vh;
+        }
+
+        .app-container {
+            background: #111; width: 100%; max-width: 400px; height: 820px; border-radius: 40px; box-shadow: 0 24px 50px rgba(0,0,0,0.5); position: relative; overflow: hidden; display: flex; flex-direction: column;
+        }
+
+        #map {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 1;
+            filter: grayscale(100%) invert(95%) contrast(110%) sepia(20%) hue-rotate(150deg);
+        }
+        
+        .custom-start-marker { display: flex; justify-content: center; align-items: center; }
+        .map-pulse { position: absolute; width: 60px; height: 60px; background-color: rgba(0, 138, 122, 0.3); border-radius: 50%; animation: pulseMap 2s infinite cubic-bezier(0.4, 0, 0.2, 1); }
+        .map-dot { position: absolute; width: 16px; height: 16px; background-color: var(--text-sec); border: 3px solid #fff; border-radius: 50%; box-shadow: 0 4px 10px rgba(0,0,0,0.4); }
+        .map-dot.teal { background-color: var(--waymo-teal); }
+        
+        @keyframes pulseMap { 0% { transform: scale(0.3); opacity: 1; } 100% { transform: scale(1.5); opacity: 0; } }
+
+        .bottom-sheet {
+            background: var(--surface); position: absolute; bottom: 0; left: 0; width: 100%;
+            border-radius: var(--radius-sheet) var(--radius-sheet) 0 0; box-shadow: 0 -10px 40px rgba(0,0,0,0.1);
+            padding: 0 24px 40px 24px; box-sizing: border-box; transition: transform 0.5s cubic-bezier(0.32, 0.72, 0, 1), height 0.5s cubic-bezier(0.32, 0.72, 0, 1);
+            z-index: 10; display: flex; flex-direction: column; height: auto; min-height: 40%;
+        }
+        .bottom-sheet.fullscreen { height: 85%; }
+        
+        .view-content { transition: opacity 0.3s ease, transform 0.3s ease; opacity: 1; transform: translateY(0); width: 100%; }
+        .view-hidden { opacity: 0; transform: translateY(10px); pointer-events: none; position: absolute; visibility: hidden; }
+
+        .drag-area { width: 100%; padding: 20px 0; cursor: pointer; display: flex; justify-content: center; z-index: 20; touch-action: none; }
+        .pull-pill { width: 44px; height: 5px; background: #d1d5db; border-radius: 3px; transition: background 0.3s; }
+
+        .waymo-headline { font-size: 26px; font-weight: 700; color: var(--text-main); margin: 0 0 6px 0; letter-spacing: -0.5px; }
+        p.subtitle { font-size: 15px; color: var(--text-sec); margin: 0 0 24px 0; line-height: 1.4; }
+        
+        .input-group { display: flex; flex-direction: column; gap: 12px; margin-bottom: 24px; }
+        .waymo-input { 
+            display: flex; align-items: center; background: var(--surface); border: 2px solid var(--border); 
+            border-radius: var(--radius-input); padding: 0 16px; transition: all 0.3s ease; cursor: text;
+        }
+        .waymo-input.active { border-color: var(--waymo-teal); box-shadow: 0 4px 15px rgba(0,138,122,0.08); }
+        
+        .dot { width: 8px; height: 8px; border-radius: 50%; margin-right: 14px; transition: background 0.3s; }
+        .dot.start { background: var(--text-sec); }
+        .dot.dest { background: var(--waymo-black); }
+        .waymo-input.active .dot { background: var(--waymo-teal); transform: scale(1.2); }
+        
+        input { width: 100%; padding: 18px 0; border: none; background: transparent; font-size: 15px; font-weight: 500; color: var(--text-main); }
+        input:focus { outline: none; }
+
+        button { width: 100%; padding: 18px; background: var(--waymo-black); color: #fff; font-weight: 600; font-size: 16px; border: none; border-radius: var(--radius-btn); cursor: pointer; display: flex; justify-content: center; align-items: center; gap: 10px; transition: all 0.2s; }
+        button:active { transform: scale(0.97); }
+        .btn-secondary { background: var(--border); color: var(--text-main); }
+        .btn-secondary:active { background: #e5e7eb; }
+        
+        .fullscreen-overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: var(--surface-glass); backdrop-filter: blur(15px); z-index: 100; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; padding: 30px; box-sizing: border-box; transition: opacity 0.4s ease, visibility 0.4s; }
+        .fullscreen-overlay.fade-out { opacity: 0; visibility: hidden; pointer-events: none; }
+        
+        /* Animierter Zoom Login */
+        .login-transition-bg { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: #ffffff; z-index: 200; display: flex; flex-direction: column; justify-content: center; align-items: center; transition: opacity 0.5s ease; opacity: 0; pointer-events: none; }
+        .login-transition-bg.active { opacity: 1; pointer-events: all; }
+        @keyframes logoZoomIn { 0% { transform: scale(0.6); opacity: 0; } 30% { transform: scale(1.1); opacity: 1; } 60% { transform: scale(1); opacity: 1; } 100% { transform: scale(40); opacity: 0; } }
+        .anim-zoom { animation: logoZoomIn 1.8s cubic-bezier(0.4, 0, 0.2, 1) forwards; }
+
+        .progress-container { width: 80%; height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; margin: 30px auto; }
+        .progress-fill { height: 100%; width: 0%; background: var(--waymo-black); transition: width 2s cubic-bezier(0.4, 0, 0.2, 1); }
+
+        /* SVG Animations */
+        .status-svg { width: 80px; height: 80px; border-radius: 50%; display: block; margin: 20px auto; stroke-width: 3; stroke-miterlimit: 10; animation: scale .3s ease-in-out both; }
+        .svg-circle { stroke-dasharray: 166; stroke-dashoffset: 166; stroke-width: 3; fill: none; animation: stroke 0.4s cubic-bezier(0.65, 0, 0.45, 1) forwards; }
+        .svg-check { transform-origin: 50% 50%; stroke-dasharray: 48; stroke-dashoffset: 48; animation: stroke 0.3s cubic-bezier(0.65, 0, 0.45, 1) 0.4s forwards; stroke: var(--waymo-teal); }
+        .svg-cross { transform-origin: 50% 50%; stroke-dasharray: 48; stroke-dashoffset: 48; animation: stroke 0.3s cubic-bezier(0.65, 0, 0.45, 1) 0.4s forwards; stroke: var(--error); }
+        
+        /* Smiley-Teile (Clean) */
+        .svg-smile-parts { stroke: var(--waymo-teal); stroke-linecap: round; fill: none; }
+        .svg-eye { stroke-width: 4; stroke-dasharray: 10; stroke-dashoffset: 10; animation: stroke 0.3s ease-out 0.3s forwards; }
+        .svg-mouth { stroke-width: 3; stroke-dasharray: 30; stroke-dashoffset: 30; animation: stroke 0.4s ease-out 0.5s forwards; }
+
+        .check-svg { stroke: var(--waymo-teal); }
+        .check-svg .svg-circle { stroke: var(--waymo-teal); }
+        .cross-svg { stroke: var(--error); }
+        .cross-svg .svg-circle { stroke: var(--error); }
+
+        @keyframes stroke { 100% { stroke-dashoffset: 0; } }
+        @keyframes scale { 0%, 100% { transform: none; } 50% { transform: scale3d(1.1, 1.1, 1); } }
+
+        .top-nav { position: absolute; top: 0; left: 0; width: 100%; padding: 30px 24px; display: flex; justify-content: space-between; align-items: center; z-index: 5; box-sizing: border-box; pointer-events: none; }
+        .top-nav > div, .top-nav > button { pointer-events: auto; }
+        .version-tag { font-size: 11px; font-weight: 700; color: var(--text-main); background: var(--surface-glass); padding: 6px 12px; border-radius: 20px; backdrop-filter: blur(8px); }
+        
+        .driver-info { display: flex; align-items: center; gap: 16px; background: var(--border); padding: 16px; border-radius: var(--radius-input); margin-top: 16px; width: 100%; box-sizing: border-box; }
+        .avatar { width: 50px; height: 50px; background: var(--waymo-teal); color: #fff; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 20px; font-weight: bold; flex-shrink: 0;}
+        
+        .status-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 8px; }
+        .status-dot.frei { background-color: #137333; }
+        .status-dot.besetzt { background-color: #c5221f; }
+        
+        .icon-svg { width: 20px; height: 20px; fill: currentColor; display: inline-block; vertical-align: middle; }
+
+        #login-screen { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: transparent; z-index: 50; display: flex; flex-direction: column; justify-content: flex-end; padding: 30px; box-sizing: border-box; transition: opacity 0.5s ease; }
+        .login-card { background: var(--surface-glass); backdrop-filter: blur(20px); border: 1px solid rgba(255,255,255,0.6); border-radius: 32px; padding: 32px 24px; box-shadow: 0 10px 40px rgba(0,0,0,0.15); margin-bottom: 20px; }
+
+        .hidden { display: none !important; }
+    </style>
+</head>
+<body>
+
+<div class="app-container">
+    <div id="map"></div>
+
+    <div id="login-screen">
+        <div style="font-size: 42px; font-weight: 800; text-align: center; margin-bottom: auto; margin-top: 50px; color: #fff; text-shadow: 0 4px 12px rgba(0,0,0,0.5);">
+            fami<span style="color: var(--waymo-teal);">.ly</span>
+        </div>
+        <div class="login-card">
+            <div class="waymo-headline" style="font-size: 24px;">Bereit für die Fahrt?</div>
+            <p class="subtitle">Logge dich in dein Konto ein.</p>
+            <div class="input-group">
+                <div class="waymo-input"><input type="text" id="username" placeholder="Name (Max / Michael)"></div>
+                <div class="waymo-input"><input type="password" id="password" placeholder="Passwort (123)"></div>
+            </div>
+            <button onclick="login()">Einloggen</button>
+        </div>
+    </div>
+
+    <div id="login-transition" class="login-transition-bg hidden">
+        <div id="zoom-logo" style="font-size: 50px; font-weight: 800; color: #111;">
+            fami<span style="color: var(--waymo-teal);">.ly</span>
+        </div>
+    </div>
+
+    <div id="fullscreen-walk-prompt" class="fullscreen-overlay fade-out hidden">
+        <div class="avatar" style="background: var(--waymo-teal); margin-bottom: 20px; width:60px; height:60px;">
+            <svg style="width:30px; height:30px; fill:#fff;" viewBox="0 0 24 24"><path d="M13.5 5.5c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zM9.8 8.9L7 21.5h2.1l1.8-8 2.1 2v6h2v-7.5l-2.1-2 .6-3c1.3 1.5 3.3 2.5 5.5 2.5v-2c-2.2 0-4.1-1.2-5-3L12.9 6c-.4-.7-1.1-1.1-1.9-1.1-.4 0-.9.1-1.2.3L4.3 8.5v5h2v-3.5l2.1-1.1z"/></svg>
+        </div>
+        <div class="waymo-headline" style="font-size: 24px;">Lieber laufen?</div>
+        <p class="subtitle" id="walk-prompt-text" style="margin-top: 10px; padding: 0 15px; font-size:16px; color:var(--text-main);"></p>
+        <div style="display: flex; gap: 12px; width: 100%; margin-top: 15px;">
+            <button class="btn-secondary" style="flex: 1;" onclick="DecisionWalk(true)">Ja, ich laufe</button>
+            <button style="flex: 1; background: var(--waymo-teal);" onclick="DecisionWalk(false)">Nein, fahren</button>
+        </div>
+    </div>
+
+    <div id="fullscreen-search" class="fullscreen-overlay fade-out hidden">
+        <div id="fs-state-loading" style="width: 100%;">
+            <div class="waymo-headline" style="font-size: 28px;">Suche Fahrzeug</div>
+            <p class="subtitle">Prüfe Verfügbarkeit...</p>
+            <div class="progress-container">
+                <div class="progress-fill" id="search-progress-fill"></div>
+            </div>
+        </div>
+        <div id="fs-state-error" class="hidden" style="width: 100%;">
+            <svg id="svg-cross-anim-search" class="status-svg cross-svg" viewBox="0 0 52 52">
+                <circle class="svg-circle" cx="26" cy="26" r="25"/>
+                <path class="svg-cross" fill="none" d="M16 16 36 36 M36 16 16 36"/>
+            </svg>
+            <div class="waymo-headline" style="font-size: 28px; margin-top: 20px;">Nicht verfügbar</div>
+            <p class="subtitle">Aktuell ist leider kein Fahrer frei.</p>
+        </div>
+    </div>
+
+    <div id="fullscreen-action-overlay" class="fullscreen-overlay fade-out hidden" style="z-index: 150;">
+        <div id="action-icon-check" class="hidden" style="width: 100%;">
+            <svg id="svg-action-check" class="status-svg check-svg" viewBox="0 0 52 52">
+                <circle class="svg-circle" cx="26" cy="26" r="25"/>
+                <path class="svg-check" fill="none" d="M14.1 27.2l7.1 7.2 16.7-16.8"/>
+            </svg>
+        </div>
+        <div id="action-icon-cross" class="hidden" style="width: 100%;">
+            <svg id="svg-action-cross" class="status-svg cross-svg" viewBox="0 0 52 52">
+                <circle class="svg-circle" cx="26" cy="26" r="25"/>
+                <path class="svg-cross" fill="none" d="M16 16 36 36 M36 16 16 36"/>
+            </svg>
+        </div>
+        <div class="waymo-headline" id="action-anim-title" style="font-size: 28px; margin-top: 20px;"></div>
+        <p class="subtitle" id="action-anim-sub" style="padding: 0 15px; font-size: 16px;"></p>
+    </div>
+
+    <div id="fullscreen-thanks" class="fullscreen-overlay fade-out hidden" style="z-index: 160;">
+        <svg id="svg-thanks-anim" class="status-svg check-svg" viewBox="0 0 52 52">
+            <circle class="svg-circle" cx="26" cy="26" r="25"/>
+            <path class="svg-smile-parts svg-eye" d="M18 20v2M34 20v2"/>
+            <path class="svg-smile-parts svg-mouth" d="M16 32c0 8 20 8 20 0"/>
+        </svg>
+        <div class="waymo-headline" style="font-size: 26px; margin-top: 20px; padding: 0 10px; line-height: 1.3;">
+            Danke, dass du diese Fahrt mit Fami.ly organisiert hast.
+        </div>
+    </div>
+
+    <div id="app-screen" class="hidden">
+        <div class="top-nav">
+            <div style="font-weight: 800; font-size: 24px; color: var(--surface); text-shadow: 0 2px 10px rgba(0,0,0,0.3);">fami<span style="color: var(--waymo-teal);">.ly</span></div>
+            <div style="display: flex; gap: 10px; align-items: center;">
+                <span class="version-tag">v1.14</span>
+                <button onclick="logout()" style="width: auto; padding: 8px 14px; font-size: 13px; border-radius: 20px; background: var(--surface); color: var(--text-main);">Logout</button>
+            </div>
+        </div>
+
+        <div id="max-view" class="hidden">
+            <div id="max-sheet" class="bottom-sheet">
+                <div class="drag-area" onclick="toggleFullscreen('max-sheet')" onmousedown="startDrag(event, 'max-sheet')" ontouchstart="startDrag(event, 'max-sheet')"><div class="pull-pill"></div></div>
+                
+                <div id="max-order-form" class="view-content">
+                    <div class="waymo-headline" style="color: var(--waymo-teal);">Wohin soll's gehen?</div>
+                    <p class="subtitle">Tippe ein Feld an und markiere den Ort auf der Karte.</p>
+                    <div class="input-group">
+                        <div class="waymo-input active" id="wrap-start" onclick="setActiveInput('start')">
+                            <div class="dot start"></div><input type="text" id="start-point" placeholder="Abholort wählen..." onclick="setActiveInput('start')" onfocus="setActiveInput('start')">
+                        </div>
+                        <div class="waymo-input" id="wrap-dest" onclick="setActiveInput('dest')">
+                            <div class="dot dest"></div><input type="text" id="destination" placeholder="Zielort wählen..." onclick="setActiveInput('dest')" onfocus="setActiveInput('dest')">
+                        </div>
+                    </div>
+                    
+                    <div id="duration-info" class="hidden" style="font-size: 15px; color: var(--waymo-teal); margin-bottom: 20px; font-weight: 600; text-align: center; background: var(--border); padding: 12px; border-radius: 12px;"></div>
+                    
+                    <button id="btn-request-ride" onclick="FahrtSuchen()">Fahrt anfordern</button>
+                </div>
+
+                <div id="max-status-section" class="view-content view-hidden">
+                    <div class="waymo-headline" id="max-status-headline" style="margin-top: 10px;">Warte auf Bestätigung</div>
+                    <p class="subtitle" id="max-status-sub">Anfrage wird vom Fahrer geprüft...</p>
+                    
+                    <div id="driver-info" class="driver-info hidden">
+                        <div class="avatar">M</div>
+                        <div>
+                            <div style="font-weight: 700; font-size: 17px;">Michael</div>
+                            <div id="driver-live-location" style="font-size: 14px; color: var(--waymo-teal); margin-top: 4px; font-weight: 600;">Standort wird ermittelt...</div>
+                        </div>
+                    </div>
+                    
+                    <button class="btn-secondary hidden" id="btn-cancel-search" style="margin-top: 20px;" onclick="ResetMaxView()">Okay, zurück</button>
+                </div>
+
+                <div id="max-thanks-screen" class="view-content view-hidden" style="text-align: center; padding: 10px 0;">
+                    <div class="waymo-headline" style="font-size: 24px; margin-bottom: 24px; line-height: 1.3;">Vergiss nicht, dich zu revanchieren!</div>
+                    <button id="btn-send-revanche" onclick="RevancheSenden()">OK</button>
+                </div>
+            </div>
+        </div>
+
+        <div id="michael-view" class="hidden">
+            <div class="bottom-sheet fullscreen" id="driver-sheet">
+                <div class="drag-area" onclick="toggleFullscreen('driver-sheet')"><div class="pull-pill"></div></div>
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
+                    <div class="waymo-headline" style="margin:0;">Fahrer-Panel</div>
+                    <button id="driver-status-btn" onclick="ToggleDriverStatus()" style="width: auto; padding: 10px 18px; font-size: 14px; border-radius: 20px; transition: all 0.3s;">
+                        <span class="status-dot frei" id="status-indicator-dot"></span><span id="status-indicator-text">Frei</span>
+                    </button>
+                </div>
+                
+                <div id="no-requests" class="view-content" style="text-align: center; padding: 50px 20px; color: var(--text-sec); font-weight: 500;">
+                    <svg class="icon-svg" style="width:40px; height:40px; color: var(--border); margin-bottom:15px;" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-1-13h2v6h-2zm0 8h2v2h-2z"/></svg><br>
+                    Du bist online.<br>Warte auf Anfragen...
+                </div>
+                
+                <div id="request-delivery" class="view-content view-hidden">
+                    <div style="background: var(--border); padding: 20px; border-radius: var(--radius-input); margin-bottom: 20px;">
+                        <div id="req-title" style="font-size: 12px; font-weight: 700; color: var(--waymo-teal); margin-bottom: 10px; text-transform: uppercase; letter-spacing: 0.5px;">Neue Anfrage</div>
+                        <div id="route-info" style="font-weight: 600; font-size: 16px; line-height: 1.6; color: var(--text-main);"></div>
+                    </div>
+                    
+                    <div id="action-buttons-new" style="display: flex; gap: 12px;">
+                        <button class="btn-secondary" style="flex: 1;" onclick="FahrtAblehnen()">Ablehnen</button>
+                        <button style="flex: 2; background: var(--waymo-teal);" onclick="FahrtAnnehmen()">Annehmen</button>
+                    </div>
+                    
+                    <div id="action-buttons-active" class="hidden">
+                        <button style="background: var(--waymo-black);" onclick="FahrtAbschliessen()">Fahrt beenden</button>
+                        <div id="auto-tracking-info" style="font-size: 13px; color: var(--text-sec); text-align: center; margin-top: 16px;">Der Live-Standort wird geteilt.</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    let currentUser = "";
+    let autoLocationInterval;
+    let map, startMarker, destMarker, routeLine;
+    let activeInputId = 'start'; 
+    let estDriveMinutes = -1;
+    let estWalkMinutes = -1;
+    let routeTimeout;
+    
+    let lastCalculatedRoute = null;
+    let lastStartPos = null;
+    let lastDestPos = null;
+    let lastRideStatus = null; // Um Animationen nur 1x zu zeigen
+
+    function initMap() {
+        if(map) return;
+        map = L.map('map', { zoomControl: false }).setView([48.223, 8.384], 15);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(map);
+
+        map.on('click', function(e) {
+            if (currentUser !== 'Max' || localStorage.getItem('familien_uber_fahrt')) return;
+
+            const isStart = activeInputId === 'start';
+            const iconHtml = isStart 
+                ? '<div class="map-dot"></div>' 
+                : '<div class="map-pulse"></div><div class="map-dot teal"></div>';
+            const mIcon = L.divIcon({ className: 'custom-start-marker', html: iconHtml, iconSize: [16, 16] });
+
+            if (isStart) {
+                if (startMarker) startMarker.setLatLng(e.latlng);
+                else startMarker = L.marker(e.latlng, {icon: mIcon}).addTo(map);
+                document.getElementById('start-point').value = "Lade Ort...";
+            } else {
+                if (destMarker) destMarker.setLatLng(e.latlng);
+                else destMarker = L.marker(e.latlng, {icon: mIcon}).addTo(map);
+                document.getElementById('destination').value = "Lade Ort...";
+            }
+            
+            triggerRouteUpdate(); 
+
+            fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${e.latlng.lat}&lon=${e.latlng.lng}`)
+                .then(res => res.json())
+                .then(data => {
+                    let place = data.address.road || data.address.village || "Markierter Ort";
+                    if (data.address.house_number) place += " " + data.address.house_number;
+                    document.getElementById(isStart ? 'start-point' : 'destination').value = place;
+                }).catch(() => { 
+                    document.getElementById(isStart ? 'start-point' : 'destination').value = "Ort markiert"; 
+                });
+        });
+        getUserLocation();
+    }
+
+    function getUserLocation() {
+        if (navigator.geolocation) {
+            navigator.geolocation.getCurrentPosition(pos => {
+                const lat = pos.coords.latitude, lng = pos.coords.longitude;
+                map.setView([lat, lng], 16);
+                const startIcon = L.divIcon({ className: 'custom-start-marker', html: '<div class="map-dot"></div>', iconSize: [16, 16] });
+                
+                if (!startMarker && currentUser === "Max") {
+                    startMarker = L.marker([lat, lng], {icon: startIcon}).addTo(map);
+                } else if (startMarker && currentUser === "Max") {
+                    startMarker.setLatLng([lat, lng]);
+                }
+
+                fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}`)
+                    .then(r => r.json()).then(data => {
+                        let place = data.address.road || "Aktueller Standort";
+                        if (data.address.house_number) place += " " + data.address.house_number;
+                        if(currentUser === "Max") {
+                            document.getElementById('start-point').value = place;
+                            setActiveInput('dest');
+                        }
+                    });
+            }, () => { 
+                if(currentUser === "Max") {
+                    document.getElementById('start-point').value = "Schramberg (Standard)"; 
+                    setActiveInput('dest');
+                }
+            });
+        }
+    }
+
+    function triggerRouteUpdate() {
+        clearTimeout(routeTimeout);
+        routeTimeout = setTimeout(() => { updateRouteAndDuration(); }, 800);
+    }
+
+    function updateRouteAndDuration() {
+        if (startMarker && destMarker) {
+            const p1 = startMarker.getLatLng();
+            const p2 = destMarker.getLatLng();
+            const coordString = `${p1.lng},${p1.lat};${p2.lng},${p2.lat}`;
+            
+            lastStartPos = p1; lastDestPos = p2;
+
+            const urlFossgis = `https://routing.openstreetmap.de/routed-car/route/v1/driving/${coordString}?overview=full&geometries=geojson`;
+            const urlOsrm = `https://router.projectosrm.org/route/v1/driving/${coordString}?overview=full&geometries=geojson`;
+
+            fetch(urlFossgis)
+                .then(res => { if (!res.ok) return fetch(urlOsrm); return res; })
+                .then(res => res.json())
+                .then(data => {
+                    if (!data.routes || data.routes.length === 0) return;
+                    
+                    const routeGeoJSON = data.routes[0].geometry;
+                    const distanceMeters = data.routes[0].distance;
+                    const durationSeconds = data.routes[0].duration;
+                    
+                    estDriveMinutes = Math.max(1, Math.round(durationSeconds / 60));
+                    estWalkMinutes = Math.max(1, Math.round((distanceMeters / 1000) * 12));
+
+                    const latLngs = routeGeoJSON.coordinates.map(c => [c[1], c[0]]);
+                    lastCalculatedRoute = latLngs;
+
+                    if (routeLine) { routeLine.setLatLngs(latLngs); } 
+                    else { routeLine = L.polyline(latLngs, { color: '#008a7a', weight: 5, opacity: 0.9 }).addTo(map); }
+                    
+                    map.fitBounds(routeLine.getBounds(), { padding: [60, 60] });
+                    
+                    const durationEl = document.getElementById('duration-info');
+                    durationEl.innerHTML = `Distanz: ${(distanceMeters/1000).toFixed(1)} km &middot; Auto: <strong>ca. ${estDriveMinutes} Min.</strong> &middot; Zu Fuß: <strong>ca. ${estWalkMinutes} Min.</strong>`;
+                    durationEl.classList.remove('hidden');
+                })
+                .catch(err => {
+                    const distanceMeters = p1.distanceTo(p2);
+                    estDriveMinutes = Math.max(1, Math.round((distanceMeters / 1000) * 2.2));
+                    estWalkMinutes = Math.max(1, Math.round((distanceMeters / 1000) * 12));
+                    lastCalculatedRoute = [p1, p2];
+
+                    if (routeLine) { routeLine.setLatLngs([p1, p2]); } 
+                    else { routeLine = L.polyline([p1, p2], { color: '#008a7a', weight: 5, opacity: 0.9 }).addTo(map); }
+                    map.fitBounds(routeLine.getBounds(), { padding: [60, 60] });
+                    
+                    const durationEl = document.getElementById('duration-info');
+                    durationEl.innerHTML = `Distanz: ${(distanceMeters/1000).toFixed(1)} km &middot; Auto: <strong>ca. ${estDriveMinutes} Min.</strong> &middot; Zu Fuß: <strong>ca. ${estWalkMinutes} Min.</strong>`;
+                    durationEl.classList.remove('hidden');
+                });
+        } else {
+            if (routeLine) { map.removeLayer(routeLine); routeLine = null; }
+            document.getElementById('duration-info').classList.add('hidden');
+            estDriveMinutes = -1; estWalkMinutes = -1; lastCalculatedRoute = null;
+        }
+    }
+
+    function setActiveInput(type) {
+        if (localStorage.getItem('familien_uber_fahrt')) return; 
+        activeInputId = type;
+        document.getElementById('wrap-start').classList.remove('active');
+        document.getElementById('wrap-dest').classList.remove('active');
+        document.getElementById(type === 'start' ? 'wrap-start' : 'wrap-dest').classList.add('active');
+    }
+
+    let startY = 0, currentY = 0, isDragging = false, activeSheet = null;
+    function toggleFullscreen(sheetId) { document.getElementById(sheetId).classList.toggle('fullscreen'); }
+    function startDrag(e, sheetId) {
+        if (!e.target.closest('.drag-area')) return;
+        activeSheet = document.getElementById(sheetId); isDragging = true;
+        startY = e.type.includes('mouse') ? e.clientY : e.touches[0].clientY;
+        activeSheet.style.transition = 'none';
+        document.addEventListener('mousemove', drag); document.addEventListener('touchmove', drag);
+        document.addEventListener('mouseup', endDrag); document.addEventListener('touchend', endDrag);
+    }
+    function drag(e) {
+        if (!isDragging) return;
+        currentY = startY - (e.type.includes('mouse') ? e.clientY : e.touches[0].clientY);
+        activeSheet.style.height = currentY > 0 ? `calc(40% + ${currentY}px)` : `calc(85% + ${currentY}px)`;
+    }
+    function endDrag() {
+        if (!isDragging) return; isDragging = false;
+        activeSheet.style.transition = 'height 0.4s cubic-bezier(0.2, 0.8, 0.2, 1)'; activeSheet.style.height = ''; 
+        if (currentY > 50) activeSheet.classList.add('fullscreen');
+        else if (currentY < -50) activeSheet.classList.remove('fullscreen');
+        document.removeEventListener('mousemove', drag); document.removeEventListener('touchmove', drag);
+        document.removeEventListener('mouseup', endDrag); document.removeEventListener('touchend', endDrag);
+        activeSheet = null; currentY = 0;
+    }
+
+    function switchView(containerId, showViewId) {
+        const container = document.getElementById(containerId);
+        const views = container.querySelectorAll('.view-content');
+        views.forEach(v => {
+            if(v.id === showViewId) {
+                v.classList.remove('view-hidden'); v.style.position = 'relative';
+            } else {
+                v.classList.add('view-hidden');
+                setTimeout(() => { if(v.classList.contains('view-hidden')) v.style.position = 'absolute'; }, 300);
+            }
+        });
+    }
+
+    function restartSvgAnim(id) {
+        const el = document.getElementById(id);
+        if(!el) return;
+        const clone = el.cloneNode(true);
+        el.parentNode.replaceChild(clone, el);
+    }
+
+    // --- OVERLAY ANIMATIONEN (Zusagen / Absagen) ---
+    function showActionOverlay(iconType, title, subtitle) {
+        const overlay = document.getElementById('fullscreen-action-overlay');
+        document.getElementById('action-anim-title').innerText = title;
+        document.getElementById('action-anim-sub').innerText = subtitle;
+        
+        document.getElementById('action-icon-check').classList.toggle('hidden', iconType !== 'check');
+        document.getElementById('action-icon-cross').classList.toggle('hidden', iconType !== 'cross');
+        
+        overlay.classList.remove('hidden');
+        setTimeout(() => overlay.classList.remove('fade-out'), 10);
+
+        if(iconType === 'check') restartSvgAnim('svg-action-check');
+        else restartSvgAnim('svg-action-cross');
+
+        setTimeout(() => {
+            overlay.classList.add('fade-out');
+            setTimeout(() => overlay.classList.add('hidden'), 400);
+        }, 2500);
+    }
+
+    // --- THANKS OVERLAY (Smiley) ---
+    function showThanksOverlay(callback) {
+        const overlay = document.getElementById('fullscreen-thanks');
+        overlay.classList.remove('hidden');
+        setTimeout(() => overlay.classList.remove('fade-out'), 10);
+        restartSvgAnim('svg-thanks-anim');
+
+        setTimeout(() => {
+            overlay.classList.add('fade-out');
+            setTimeout(() => {
+                overlay.classList.add('hidden');
+                if(callback) callback();
+            }, 400);
+        }, 2500);
+    }
+
+    if(!localStorage.getItem('driver_status')) localStorage.setItem('driver_status', 'FREI');
+    
+    function login() {
+        const u = document.getElementById('username').value.trim();
+        if ((u === "Max" || u === "Michael") && document.getElementById('password').value === "123") {
+            currentUser = u;
+            document.getElementById('login-screen').style.opacity = '0';
+            
+            setTimeout(() => {
+                document.getElementById('login-screen').classList.add('hidden');
+                
+                const transBg = document.getElementById('login-transition');
+                const zoomLogo = document.getElementById('zoom-logo');
+                
+                transBg.classList.remove('hidden');
+                transBg.classList.add('active');
+                zoomLogo.classList.add('anim-zoom');
+                
+                setTimeout(() => {
+                    transBg.classList.remove('active');
+                    setTimeout(() => {
+                        transBg.classList.add('hidden');
+                        document.getElementById('app-screen').classList.remove('hidden');
+                        initUserView(); initMap();
+                        window.addEventListener('storage', checkUpdate); setInterval(checkUpdate, 1000);
+                    }, 500);
+                }, 1700);
+                
+            }, 500);
+        }
+    }
+    function logout() { location.reload(); }
+
+    function initUserView() {
+        if (currentUser === "Max") {
+            document.getElementById('max-view').classList.remove('hidden');
+            switchView('max-sheet', 'max-order-form');
+        } else {
+            document.getElementById('michael-view').classList.remove('hidden');
+            switchView('driver-sheet', 'no-requests');
+        }
+        checkUpdate();
+    }
+
+    function ToggleDriverStatus() {
+        localStorage.setItem('driver_status', localStorage.getItem('driver_status') === 'FREI' ? 'OCCUPIED' : 'FREI'); checkUpdate();
+    }
+
+    function FahrtSuchen() {
+        const start = document.getElementById('start-point').value; 
+        const ziel = document.getElementById('destination').value;
+        const btn = document.getElementById('btn-request-ride');
+
+        if(!start || !ziel || start.includes("Lade") || ziel.includes("Lade") || !startMarker || !destMarker) {
+            const oldText = btn.innerText; const oldBg = btn.style.background;
+            btn.innerText = "Bitte Orte markieren!"; btn.style.background = "var(--error)";
+            setTimeout(() => { btn.innerText = oldText; btn.style.background = oldBg; }, 2500);
+            return;
+        }
+
+        if (!lastStartPos || !lastDestPos || !lastCalculatedRoute) {
+            lastStartPos = startMarker.getLatLng();
+            lastDestPos = destMarker.getLatLng();
+            lastCalculatedRoute = [lastStartPos, lastDestPos];
+        }
+
+        if (estDriveMinutes === -1 && startMarker && destMarker) {
+            const dist = startMarker.getLatLng().distanceTo(destMarker.getLatLng());
+            estDriveMinutes = Math.max(1, Math.round((dist / 1000) * 2.2));
+            estWalkMinutes = Math.max(1, Math.round((dist / 1000) * 12));
+        }
+
+        if (estDriveMinutes < 3 && estDriveMinutes > 0) {
+            const promptLayer = document.getElementById('fullscreen-walk-prompt');
+            document.getElementById('walk-prompt-text').innerHTML = `Es sind nur <strong>ca. ${estWalkMinutes} Minuten</strong> zu Fuß. Willst du nicht lieber laufen?`;
+            promptLayer.classList.remove('hidden');
+            setTimeout(() => promptLayer.classList.remove('fade-out'), 50);
+            return;
+        }
+
+        EchteFahrtBeantragen(start, ziel);
+    }
+
+    function DecisionWalk(willWalk) {
+        const promptLayer = document.getElementById('fullscreen-walk-prompt');
+        promptLayer.classList.add('fade-out');
+        setTimeout(() => promptLayer.classList.add('hidden'), 400);
+
+        if (willWalk) {
+            ResetMaxView();
+        } else {
+            const start = document.getElementById('start-point').value; 
+            const ziel = document.getElementById('destination').value;
+            EchteFahrtBeantragen(start, ziel);
+        }
+    }
+
+    function EchteFahrtBeantragen(start, ziel) {
+        localStorage.removeItem('familien_uber_fahrt');
+        lastRideStatus = null; // Resetten für neuen Durchlauf
+
+        const fsLayer = document.getElementById('fullscreen-search');
+        const fsLoading = document.getElementById('fs-state-loading');
+        const fsError = document.getElementById('fs-state-error');
+        const pFill = document.getElementById('search-progress-fill');
+
+        fsLayer.classList.remove('hidden');
+        fsLayer.classList.remove('fade-out');
+        fsLoading.classList.remove('hidden'); 
+        fsError.classList.add('hidden');
+        pFill.style.width = '0%';
+
+        setTimeout(() => { pFill.style.width = '100%'; }, 50);
+
+        setTimeout(() => {
+            fsLoading.classList.add('hidden');
+            
+            if (localStorage.getItem('driver_status') === 'FREI') {
+                fsLayer.classList.add('fade-out');
+                setTimeout(() => fsLayer.classList.add('hidden'), 400);
+                
+                localStorage.setItem('familien_uber_fahrt', JSON.stringify({ 
+                    status: "PENDING", von: start, nach: ziel, driverLocation: "",
+                    route: lastCalculatedRoute, startPos: lastStartPos, destPos: lastDestPos 
+                }));
+                checkUpdate();
+            } else {
+                fsError.classList.remove('hidden'); 
+                restartSvgAnim('svg-cross-anim-search');
+                
+                setTimeout(() => {
+                    fsLayer.classList.add('fade-out');
+                    setTimeout(() => fsLayer.classList.add('hidden'), 400);
+                    
+                    switchView('max-sheet', 'max-status-section');
+                    document.getElementById('max-status-headline').innerText = "Fahrt fehlgeschlagen";
+                    document.getElementById('max-status-sub').innerText = "Aktuell ist leider kein Fahrer frei.";
+                    document.getElementById('driver-info').classList.add('hidden');
+                    document.getElementById('btn-cancel-search').classList.remove('hidden');
+                }, 1500);
+            }
+        }, 2000);
+    }
+
+    function ResetMaxView() {
+        localStorage.removeItem('familien_uber_fahrt');
+        lastRideStatus = null;
+        if(destMarker) { map.removeLayer(destMarker); destMarker = null; }
+        if(routeLine) { map.removeLayer(routeLine); routeLine = null; }
+        document.getElementById('destination').value = "";
+        estDriveMinutes = -1; estWalkMinutes = -1; lastCalculatedRoute = null;
+        window.driverRouteDrawn = false;
+        setActiveInput('dest');
+        switchView('max-sheet', 'max-order-form');
+        document.getElementById('duration-info').classList.add('hidden');
+        checkUpdate();
+    }
+
+    function FahrtAnnehmen() {
+        let fahrt = JSON.parse(localStorage.getItem('familien_uber_fahrt'));
+        showActionOverlay('check', 'Fahrt angenommen', `Du hast die Fahrt nach ${fahrt.nach} angenommen.`);
+        
+        localStorage.setItem('driver_status', 'OCCUPIED');
+        fahrt.status = "ACCEPTED"; fahrt.driverLocation = "Ist auf dem Weg...";
+        localStorage.setItem('familien_uber_fahrt', JSON.stringify(fahrt));
+        startAutoTracking(); checkUpdate();
+    }
+
+    function FahrtAblehnen() {
+        showActionOverlay('check', 'Fahrt abgelehnt', 'Du hast die Fahrt abgelehnt.');
+        
+        let fahrt = JSON.parse(localStorage.getItem('familien_uber_fahrt'));
+        fahrt.status = "DECLINED"; 
+        localStorage.setItem('familien_uber_fahrt', JSON.stringify(fahrt)); 
+        checkUpdate();
+    }
+
+    function FahrtAbschliessen() {
+        let fahrt = JSON.parse(localStorage.getItem('familien_uber_fahrt'));
+        if(fahrt) {
+            fahrt.status = "FINISHED";
+            localStorage.setItem('familien_uber_fahrt', JSON.stringify(fahrt));
+        }
+        clearInterval(autoLocationInterval); 
+        
+        showThanksOverlay(() => {
+            switchView('driver-sheet', 'no-requests');
+            localStorage.setItem('driver_status', 'FREI');
+            clearDriverMap();
+            checkUpdate();
+        });
+    }
+
+    function RevancheSenden() {
+        showThanksOverlay(() => {
+            ResetMaxView();
+        });
+    }
+
+    function drawDriverMap(fahrt) {
+        if (!fahrt.route || !fahrt.startPos || !fahrt.destPos) return;
+        if (window.driverRouteDrawn) return; 
+
+        if (startMarker) { map.removeLayer(startMarker); startMarker = null; }
+        if (destMarker) { map.removeLayer(destMarker); destMarker = null; }
+        if (routeLine) { map.removeLayer(routeLine); routeLine = null; }
+
+        const mIconStart = L.divIcon({ className: 'custom-start-marker', html: '<div class="map-dot"></div>', iconSize: [16, 16] });
+        startMarker = L.marker([fahrt.startPos.lat, fahrt.startPos.lng], {icon: mIconStart}).addTo(map);
+
+        const mIconDest = L.divIcon({ className: 'custom-start-marker', html: '<div class="map-pulse"></div><div class="map-dot teal"></div>', iconSize: [16, 16] });
+        destMarker = L.marker([fahrt.destPos.lat, fahrt.destPos.lng], {icon: mIconDest}).addTo(map);
+
+        routeLine = L.polyline(fahrt.route, { color: '#008a7a', weight: 5, opacity: 0.9 }).addTo(map);
+        map.fitBounds(routeLine.getBounds(), { padding: [60, 60] });
+
+        window.driverRouteDrawn = true;
+    }
+
+    function clearDriverMap() {
+        if (startMarker) { map.removeLayer(startMarker); startMarker = null; }
+        if (destMarker) { map.removeLayer(destMarker); destMarker = null; }
+        if (routeLine) { map.removeLayer(routeLine); routeLine = null; }
+        window.driverRouteDrawn = false;
+        
+        getUserLocation();
+    }
+
+    function startAutoTracking() {
+        const route = ["Noch 4 Minuten entfernt...", "Biegt in deine Straße ein...", "Ist gleich da...", "Angekommen!"]; let step = 0;
+        autoLocationInterval = setInterval(() => {
+            let fahrtRaw = localStorage.getItem('familien_uber_fahrt');
+            if(!fahrtRaw) { clearInterval(autoLocationInterval); return; }
+            let fahrt = JSON.parse(fahrtRaw);
+            if(fahrt && fahrt.status === "ACCEPTED" && step < route.length) {
+                fahrt.driverLocation = route[step]; localStorage.setItem('familien_uber_fahrt', JSON.stringify(fahrt)); step++;
+                checkUpdate();
+            } else { clearInterval(autoLocationInterval); }
+        }, 4000);
+    }
+
+    function checkUpdate() {
+        if(currentUser === "") return;
+        const fahrtRaw = localStorage.getItem('familien_uber_fahrt'); 
+        const dStatus = localStorage.getItem('driver_status');
+        
+        const dBtn = document.getElementById('driver-status-btn');
+        const dDot = document.getElementById('status-indicator-dot');
+        const dText = document.getElementById('status-indicator-text');
+        if(dBtn) { 
+            dText.innerText = dStatus === 'FREI' ? 'Frei' : 'Besetzt'; 
+            dDot.className = dStatus === 'FREI' ? 'status-dot frei' : 'status-dot besetzt';
+            dBtn.style.background = dStatus === 'FREI' ? '#e6f4ea' : '#fce8e6'; 
+            dBtn.style.color = dStatus === 'FREI' ? '#137333' : '#c5221f';
+        }
+
+        const mapEl = document.getElementById('map');
+        if(fahrtRaw) { mapEl.style.cursor = 'not-allowed'; } else { mapEl.style.cursor = ''; }
+
+        if (fahrtRaw) {
+            const fahrt = JSON.parse(fahrtRaw);
+            const currentStatus = fahrt.status;
+            
+            // Animationen für Max triggern (Status Check)
+            if (currentUser === "Max" && currentStatus !== lastRideStatus) {
+                if (currentStatus === "ACCEPTED") {
+                    showActionOverlay('check', 'Fahrt angenommen', 'Michael hat die Fahrt angenommen.');
+                } else if (currentStatus === "DECLINED") {
+                    showActionOverlay('cross', 'Nicht verfügbar', 'Kein Fahrer konnte diese Fahrt übernehmen.');
+                }
+            }
+            lastRideStatus = currentStatus;
+
+            if (currentUser === "Max") {
+                if (currentStatus === "PENDING") {
+                    switchView('max-sheet', 'max-status-section');
+                    document.getElementById('driver-info').classList.add('hidden');
+                    document.getElementById('max-status-headline').innerText = "Warte auf Bestätigung";
+                    document.getElementById('max-status-sub').innerText = "Anfrage wurde an Michael gesendet.";
+                    document.getElementById('btn-cancel-search').classList.add('hidden');
+                } 
+                else if (currentStatus === "ACCEPTED") {
+                    switchView('max-sheet', 'max-status-section');
+                    document.getElementById('driver-info').classList.remove('hidden');
+                    document.getElementById('max-status-headline').innerText = "Fahrt bestätigt";
+                    document.getElementById('max-status-sub').innerText = "Michael ist auf dem Weg";
+                    document.getElementById('driver-live-location').innerText = fahrt.driverLocation;
+                    document.getElementById('btn-cancel-search').classList.add('hidden');
+                }
+                else if (currentStatus === "DECLINED") {
+                    switchView('max-sheet', 'max-status-section');
+                    document.getElementById('max-status-headline').innerText = "Fahrt abgelehnt";
+                    document.getElementById('max-status-sub').innerText = "Michael hat aktuell leider keine Zeit.";
+                    document.getElementById('driver-info').classList.add('hidden');
+                    document.getElementById('btn-cancel-search').classList.remove('hidden');
+                }
+                else if (currentStatus === "FINISHED") {
+                    switchView('max-sheet', 'max-thanks-screen');
+                }
+            } 
+            else if (currentUser === "Michael") {
+                try { drawDriverMap(fahrt); } catch(e) {}
+
+                if (currentStatus === "PENDING") {
+                    switchView('driver-sheet', 'request-delivery');
+                    document.getElementById('req-title').innerText = "Neue Anfrage von Max";
+                    document.getElementById('route-info').innerText = `Abholort: ${fahrt.von}\nZiel: ${fahrt.nach}`;
+                    document.getElementById('action-buttons-new').classList.remove('hidden');
+                    document.getElementById('action-buttons-active').classList.add('hidden');
+                }
+                else if (currentStatus === "ACCEPTED") {
+                    switchView('driver-sheet', 'request-delivery');
+                    document.getElementById('req-title').innerText = "Aktive Fahrt";
+                    document.getElementById('action-buttons-new').classList.add('hidden');
+                    document.getElementById('action-buttons-active').classList.remove('hidden');
+                }
+                else if (currentStatus === "DECLINED" || currentStatus === "FINISHED") {
+                    switchView('driver-sheet', 'no-requests');
+                    clearDriverMap();
+                }
+            }
+        } else {
+            lastRideStatus = null;
+            if (currentUser === "Max") {
+                if(document.getElementById('max-status-headline').innerText !== "Fahrt fehlgeschlagen") {
+                    switchView('max-sheet', 'max-order-form');
+                }
+            } else if (currentUser === "Michael") {
+                switchView('driver-sheet', 'no-requests');
+                clearDriverMap();
+            }
+        }
+    }
+</script>
+</body>
+</html>
